@@ -9,6 +9,8 @@ import com.arphoto.capture.arcore.FrameExporter
 import com.arphoto.capture.data.AssetCategory
 import com.arphoto.capture.data.CaptureMetadata
 import com.arphoto.capture.data.FrameMetadata
+import com.arphoto.capture.data.MeasurementResult
+import com.arphoto.capture.network.UploadManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -18,6 +20,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     private val arCoreManager = ARCoreManager(application)
     private val frameExporter = FrameExporter(application)
+    private val uploadManager = UploadManager()
 
     private val _uiState = MutableStateFlow<CaptureUiState>(CaptureUiState.Idle)
     val uiState: StateFlow<CaptureUiState> = _uiState
@@ -30,6 +33,9 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     private val _isCapturing = MutableStateFlow(false)
     val isCapturing: StateFlow<Boolean> = _isCapturing
+
+    private val _uploadState = MutableStateFlow<UploadState>(UploadState.Idle)
+    val uploadState: StateFlow<UploadState> = _uploadState
 
     private val capturedMetadata = mutableListOf<FrameMetadata>()
     private val rgbFiles = mutableListOf<File>()
@@ -117,6 +123,29 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         return Triple(rgbFiles, depthFiles, metadata)
     }
 
+    fun uploadCapture() {
+        viewModelScope.launch {
+            _uploadState.value = UploadState.Uploading
+
+            val (rgbFiles, depthFiles, metadata) = getCaptureData()
+
+            val result = uploadManager.uploadCapture(rgbFiles, depthFiles, metadata)
+
+            result.fold(
+                onSuccess = { measurementResult ->
+                    _uploadState.value = UploadState.Success(measurementResult)
+                },
+                onFailure = { error ->
+                    _uploadState.value = UploadState.Error(error.message ?: "Upload failed")
+                }
+            )
+        }
+    }
+
+    fun resetUploadState() {
+        _uploadState.value = UploadState.Idle
+    }
+
     private fun clearCaptureData() {
         capturedMetadata.clear()
         rgbFiles.clear()
@@ -145,4 +174,11 @@ sealed class CaptureUiState {
     object Capturing : CaptureUiState()
     data class ReadyToUpload(val frameCount: Int, val category: AssetCategory) : CaptureUiState()
     data class Error(val message: String) : CaptureUiState()
+}
+
+sealed class UploadState {
+    object Idle : UploadState()
+    object Uploading : UploadState()
+    data class Success(val result: MeasurementResult) : UploadState()
+    data class Error(val message: String) : UploadState()
 }

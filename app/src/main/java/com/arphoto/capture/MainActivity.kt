@@ -8,8 +8,13 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.*
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arphoto.capture.ui.CaptureScreen
+import com.arphoto.capture.ui.ResultsScreen
+import com.arphoto.capture.viewmodel.CaptureViewModel
+import com.arphoto.capture.viewmodel.UploadState
 
 class MainActivity : ComponentActivity() {
 
@@ -38,11 +43,28 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface {
-                    CaptureScreen(
-                        onUploadClick = {
-                            // Will implement upload in Step 04
+                    val viewModel: CaptureViewModel = viewModel()
+                    val uploadState by viewModel.uploadState.collectAsState()
+
+                    when (val state = uploadState) {
+                        is UploadState.Success -> {
+                            ResultsScreen(
+                                result = state.result,
+                                onBackClick = {
+                                    // Reset to capture screen
+                                    viewModel.resetUploadState()
+                                }
+                            )
                         }
-                    )
+                        else -> {
+                            CaptureScreen(
+                                viewModel = viewModel,
+                                onUploadClick = {
+                                    viewModel.uploadCapture()
+                                }
+                            )
+                        }
+                    }
                 }
             }
         }
