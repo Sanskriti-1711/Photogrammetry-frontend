@@ -10,17 +10,22 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arphoto.capture.viewmodel.CaptureUiState
 import com.arphoto.capture.viewmodel.CaptureViewModel
+import com.arphoto.capture.viewmodel.UploadState
 
 @Composable
 fun CaptureScreen(
     viewModel: CaptureViewModel = viewModel(),
-    onUploadClick: () -> Unit
+    onProcessClick: () -> Unit,
+    onClassifyClick: () -> Unit,
+    onReconstructClick: () -> Unit,
+    onPoseSanityClick: () -> Unit
 ) {
     val uiState by viewModel.uiState.collectAsState()
     val selectedCategory by viewModel.selectedCategory.collectAsState()
     val frameCount by viewModel.frameCount.collectAsState()
     val isCapturing by viewModel.isCapturing.collectAsState()
     val trackingState by viewModel.trackingState.collectAsState()
+    val uploadState by viewModel.uploadState.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.initializeARCore()
@@ -77,8 +82,13 @@ fun CaptureScreen(
                 frameCount = frameCount,
                 trackingState = trackingState,
                 onToggleCapture = { viewModel.toggleCapture() },
-                onUpload = onUploadClick,
-                showUploadButton = uiState is CaptureUiState.ReadyToUpload
+                onProcess = onProcessClick,
+                onClassify = onClassifyClick,
+                onReconstruct = onReconstructClick,
+                onPoseSanity = onPoseSanityClick,
+                showActionButtons = uiState is CaptureUiState.ReadyToUpload,
+                isBusy = uploadState is UploadState.Uploading,
+                busyOperation = (uploadState as? UploadState.Uploading)?.operation
             )
         }
 
@@ -88,6 +98,14 @@ fun CaptureScreen(
                 modifier = Modifier.padding(16.dp)
             ) {
                 Text((uiState as CaptureUiState.Error).message)
+            }
+        }
+
+        if (uploadState is UploadState.Error) {
+            Snackbar(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text((uploadState as UploadState.Error).message)
             }
         }
     }

@@ -14,8 +14,13 @@ fun CaptureControls(
     frameCount: Int,
     trackingState: String,
     onToggleCapture: () -> Unit,
-    onUpload: () -> Unit,
-    showUploadButton: Boolean,
+    onProcess: () -> Unit,
+    onClassify: () -> Unit,
+    onReconstruct: () -> Unit,
+    onPoseSanity: () -> Unit,
+    showActionButtons: Boolean,
+    isBusy: Boolean,
+    busyOperation: String?,
     modifier: Modifier = Modifier
 ) {
     Card(
@@ -59,6 +64,7 @@ fun CaptureControls(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
+                enabled = !isBusy,
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isCapturing)
                         MaterialTheme.colorScheme.error
@@ -72,22 +78,63 @@ fun CaptureControls(
                 )
             }
 
-            // Upload button (shown after capture stops)
-            if (showUploadButton) {
+            if (isBusy && !busyOperation.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "$busyOperation in progress...",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+
+            if (showActionButtons) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Button(
-                    onClick = onUpload,
+                    onClick = onProcess,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
+                    enabled = !isBusy,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.secondary
                     )
                 ) {
                     Text(
-                        text = "Upload to Backend",
+                        text = "Process + Measure",
                         style = MaterialTheme.typography.titleMedium
                     )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onClassify,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    enabled = !isBusy
+                ) {
+                    Text(text = "Classify")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onReconstruct,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    enabled = !isBusy
+                ) {
+                    Text(text = "Reconstruct")
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = onPoseSanity,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                    enabled = !isBusy
+                ) {
+                    Text(text = "Pose Sanity")
                 }
             }
         }

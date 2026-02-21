@@ -1,15 +1,17 @@
 package com.arphoto.capture.arcore
 
 import android.content.Context
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
 import android.media.Image
 import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.io.File
-import java.nio.ShortBuffer
+import java.io.OutputStream
+import java.util.zip.CRC32
+import java.util.zip.Deflater
+import java.util.zip.DeflaterOutputStream
 
 class FrameExporter(private val context: Context) {
 
@@ -44,30 +46,69 @@ class FrameExporter(private val context: Context) {
     }
 
     /**
-     * Save depth image as 16-bit PNG
+     * Save depth image as true 16-bit grayscale PNG (millimeters).
      */
-    fun saveDepthImage(depthBuffer: ShortBuffer, width: Int, height: Int, frameNumber: Int): File {
+    fun saveDepthImage(depthValues: ShortArray, width: Int, height: Int, frameNumber: Int): File {
         val depthFile = File(cacheDir, "depth_${frameNumber}.png")
-
-        // Convert ShortBuffer to Bitmap (grayscale 16-bit)
-        val pixels = IntArray(width * height)
-        depthBuffer.rewind()
-
-        for (i in pixels.indices) {
-            val depth = depthBuffer.get(i).toInt() and 0xFFFF
-            // Scale to 8-bit for PNG (multiply by 255/max_depth)
-            val scaled = (depth * 255 / 8000).coerceIn(0, 255)
-            pixels[i] = (0xFF shl 24) or (scaled shl 16) or (scaled shl 8) or scaled
+        val pixelCount = width * height
+        require(depthValues.size >= pixelCount) {
+            "Depth buffer is smaller than expected image dimensions."
         }
-
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        bitmap.setPixels(pixels, 0, width, 0, 0, width, height)
-
-        depthFile.outputStream().use {
-            bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)
+        depthFile.outputStream().use { out ->
+            writeGray16Png(out, depthValues, width, height)
         }
-
         return depthFile
+    }
+
+    private fun writeGray16Png(out: OutputStream, depthValues: ShortArray, width: Int, height: Int) {
+        val pngSignature = byteArrayOf(
+            137.toByte(), 80, 78, 71, 13, 10, 26, 10
+        )
+        val rawScanlineData = ByteArrayOutputStream((width * 2 + 1) * height)
+        for (y in 0 until height) {
+            rawScanlineData.write(0) // PNG filter type: None
+            val rowOffset = y * width
+            for (x in 0 until width) {
+                val depthMm = depthValues[rowOffset + x].toInt() and 0xFFFF
+                rawScanlineData.write((depthMm ushr 8) and 0xFF) // big-endian per PNG spec
+                rawScanlineData.write(depthMm and 0xFF)
+            }
+        }
+
+        val compressed = ByteArrayOutputStream(rawScanlineData.size())
+        DeflaterOutputStream(compressed, Deflater(Deflater.BEST_SPEED)).use { deflater ->
+            deflater.write(rawScanlineData.toByteArray())
+        }
+
+        DataOutputStream(out).use { dataOut ->
+            dataOut.write(pngSignature)
+
+            val ihdr = ByteArrayOutputStream(13)
+            DataOutputStream(ihdr).use { ihdrOut ->
+                ihdrOut.writeInt(width)
+                ihdrOut.writeInt(height)
+                ihdrOut.writeByte(16) // bit depth
+                ihdrOut.writeByte(0) // grayscale
+                ihdrOut.writeByte(0) // compression method
+                ihdrOut.writeByte(0) // filter method
+                ihdrOut.writeByte(0) // no interlace
+            }
+            writeChunk(dataOut, "IHDR", ihdr.toByteArray())
+            writeChunk(dataOut, "IDAT", compressed.toByteArray())
+            writeChunk(dataOut, "IEND", ByteArray(0))
+        }
+    }
+
+    private fun writeChunk(out: DataOutputStream, type: String, data: ByteArray) {
+        val typeBytes = type.toByteArray(Charsets.US_ASCII)
+        out.writeInt(data.size)
+        out.write(typeBytes)
+        out.write(data)
+
+        val crc = CRC32()
+        crc.update(typeBytes)
+        crc.update(data)
+        out.writeInt(crc.value.toInt())
     }
 
     private fun imageToByteArray(image: Image): ByteArray {

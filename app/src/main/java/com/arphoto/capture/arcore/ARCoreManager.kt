@@ -13,8 +13,6 @@ class ARCoreManager(private val context: Context) {
     private val _trackingState = MutableStateFlow("NOT_TRACKING")
     val trackingState: StateFlow<String> = _trackingState
 
-    private val capturedFrames = mutableListOf<CapturedFrame>()
-
     data class CapturedFrame(
         val rgbImage: Image,
         val depthImage: Image,
@@ -22,6 +20,7 @@ class ARCoreManager(private val context: Context) {
     )
 
     fun initializeSession() {
+        if (session != null) return
         session = Session(context).apply {
             val config = Config(this).apply {
                 depthMode = Config.DepthMode.AUTOMATIC
@@ -90,11 +89,17 @@ class ARCoreManager(private val context: Context) {
     }
 
     fun pause() {
-        session?.pause()
+        try {
+            session?.pause()
+        } catch (_: Exception) {
+        }
     }
 
     fun resume() {
-        session?.resume()
+        try {
+            session?.resume()
+        } catch (_: Exception) {
+        }
     }
 
     fun destroy() {

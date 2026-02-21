@@ -10,6 +10,7 @@ import com.arphoto.capture.data.AssetCategory
 import com.arphoto.capture.data.CaptureMetadata
 import com.arphoto.capture.data.FrameMetadata
 import com.arphoto.capture.data.MeasurementResult
+import com.google.gson.GsonBuilder
 import com.arphoto.capture.network.UploadManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,6 +22,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     private val arCoreManager = ARCoreManager(application)
     private val frameExporter = FrameExporter(application)
     private val uploadManager = UploadManager()
+    private val gson = GsonBuilder().setPrettyPrinting().create()
 
     private val _uiState = MutableStateFlow<CaptureUiState>(CaptureUiState.Idle)
     val uiState: StateFlow<CaptureUiState> = _uiState
@@ -46,6 +48,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     fun initializeARCore() {
         try {
             arCoreManager.initializeSession()
+            arCoreManager.resume()
             _uiState.value = CaptureUiState.Ready
         } catch (e: Exception) {
             _uiState.value = CaptureUiState.Error(e.message ?: "ARCore init failed")
@@ -125,7 +128,7 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     fun uploadCapture() {
         viewModelScope.launch {
-            _uploadState.value = UploadState.Uploading
+            _uploadState.value = UploadState.Uploading("Process")
 
             val (rgbFiles, depthFiles, metadata) = getCaptureData()
 
@@ -133,10 +136,64 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
             result.fold(
                 onSuccess = { measurementResult ->
-                    _uploadState.value = UploadState.Success(measurementResult)
+                    _uploadState.value = UploadState.MeasurementSuccess(measurementResult)
                 },
                 onFailure = { error ->
                     _uploadState.value = UploadState.Error(error.message ?: "Upload failed")
+                }
+            )
+        }
+    }
+
+    fun classifyCapture() {
+        viewModelScope.launch {
+            _uploadState.value = UploadState.Uploading("Classify")
+
+            val (rgbFiles, depthFiles, metadata) = getCaptureData()
+            val result = uploadManager.classifyCapture(rgbFiles, depthFiles, metadata)
+
+            result.fold(
+                onSuccess = { json ->
+                    _uploadState.value = UploadState.JsonSuccess("Classify", gson.toJson(json))
+                },
+                onFailure = { error ->
+                    _uploadState.value = UploadState.Error(error.message ?: "Classification failed")
+                }
+            )
+        }
+    }
+
+    fun reconstructCapture() {
+        viewModelScope.launch {
+            _uploadState.value = UploadState.Uploading("Reconstruct")
+
+            val (rgbFiles, depthFiles, metadata) = getCaptureData()
+            val result = uploadManager.reconstructCapture(rgbFiles, depthFiles, metadata)
+
+            result.fold(
+                onSuccess = { json ->
+                    _uploadState.value = UploadState.JsonSuccess("Reconstruct", gson.toJson(json))
+                },
+                onFailure = { error ->
+                    _uploadState.value = UploadState.Error(error.message ?: "Reconstruction failed")
+                }
+            )
+        }
+    }
+
+    fun poseSanity() {
+        viewModelScope.launch {
+            _uploadState.value = UploadState.Uploading("Pose Sanity")
+
+            val (_, _, metadata) = getCaptureData()
+            val result = uploadManager.poseSanity(metadata)
+
+            result.fold(
+                onSuccess = { json ->
+                    _uploadState.value = UploadState.JsonSuccess("Pose Sanity", gson.toJson(json))
+                },
+                onFailure = { error ->
+                    _uploadState.value = UploadState.Error(error.message ?: "Pose sanity failed")
                 }
             )
         }
@@ -178,7 +235,8 @@ sealed class CaptureUiState {
 
 sealed class UploadState {
     object Idle : UploadState()
-    object Uploading : UploadState()
-    data class Success(val result: MeasurementResult) : UploadState()
+    data class Uploading(val operation: String) : UploadState()
+    data class MeasurementSuccess(val result: MeasurementResult) : UploadState()
+    data class JsonSuccess(val operation: String, val payload: String) : UploadState()
     data class Error(val message: String) : UploadState()
 }

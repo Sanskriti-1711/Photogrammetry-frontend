@@ -1,5 +1,6 @@
 package com.arphoto.capture.network
 
+import com.arphoto.capture.BuildConfig
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
@@ -8,11 +9,8 @@ import java.util.concurrent.TimeUnit
 
 object ApiConfig {
 
-    // Change this to your backend URL
-    // For emulator: "http://10.0.2.2:5000"
-    // For physical device: "http://YOUR_LOCAL_IP:5000"
-    // For production: "https://api.yourapp.com"
-    private const val BASE_URL = "http://10.0.2.2:5000"
+    // Configure in app/build.gradle.kts -> buildConfigField("BASE_URL", ...)
+    private const val BASE_URL = BuildConfig.BASE_URL
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
         level = HttpLoggingInterceptor.Level.BODY

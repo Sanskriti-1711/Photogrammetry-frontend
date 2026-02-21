@@ -2,13 +2,11 @@ package com.arphoto.capture.arcore
 
 import android.media.Image
 import com.google.ar.core.Frame
-import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.ShortBuffer
 
 object DepthProcessor {
 
-    private const val CONFIDENCE_THRESHOLD = 0.5f
+    private const val CONFIDENCE_THRESHOLD = 128 // [0..255]
 
     /**
      * Apply confidence masking to depth image.
@@ -17,39 +15,58 @@ object DepthProcessor {
     fun applyConfidenceMask(
         depthImage: Image,
         frame: Frame
-    ): ShortBuffer {
-        val depthBuffer = depthImage.planes[0].buffer.asShortBuffer()
-        val depthArray = ShortArray(depthBuffer.capacity())
-        depthBuffer.get(depthArray)
-        depthBuffer.rewind()
+    ): ShortArray {
+        val depthArray = extractDepthArray(depthImage)
 
         // Get confidence image
         val confidenceImage = try {
             frame.acquireRawDepthConfidenceImage()
         } catch (e: Exception) {
             // If confidence not available, return original depth
-            return depthBuffer
+            return depthArray
         }
 
-        val confidenceBuffer = confidenceImage.planes[0].buffer
+        val width = depthImage.width
+        val height = depthImage.height
+        val maskWidth = minOf(width, confidenceImage.width)
+        val maskHeight = minOf(height, confidenceImage.height)
+        val confidencePlane = confidenceImage.planes[0]
+        val confidenceBuffer = confidencePlane.buffer
+        val confidenceRowStride = confidencePlane.rowStride
+        val confidencePixelStride = confidencePlane.pixelStride
 
         // Mask low-confidence pixels
-        for (i in depthArray.indices) {
-            val confidence = (confidenceBuffer.get(i).toInt() and 0xFF) / 255f
-            if (confidence < CONFIDENCE_THRESHOLD) {
-                depthArray[i] = 0  // Mask pixel
+        for (y in 0 until maskHeight) {
+            for (x in 0 until maskWidth) {
+                val idx = y * width + x
+                val confOffset = y * confidenceRowStride + x * confidencePixelStride
+                val confidence = confidenceBuffer.get(confOffset).toInt() and 0xFF
+                if (confidence < CONFIDENCE_THRESHOLD) {
+                    depthArray[idx] = 0
+                }
             }
         }
 
         confidenceImage.close()
+        return depthArray
+    }
 
-        // Return masked depth as ShortBuffer
-        val maskedBuffer = ByteBuffer.allocateDirect(depthArray.size * 2)
-            .order(ByteOrder.nativeOrder())
-            .asShortBuffer()
-        maskedBuffer.put(depthArray)
-        maskedBuffer.rewind()
+    private fun extractDepthArray(depthImage: Image): ShortArray {
+        val width = depthImage.width
+        val height = depthImage.height
+        val out = ShortArray(width * height)
+        val plane = depthImage.planes[0]
+        val depthBuffer = plane.buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
+        val rowStride = plane.rowStride
+        val pixelStride = plane.pixelStride
 
-        return maskedBuffer
+        for (y in 0 until height) {
+            val rowStart = y * rowStride
+            for (x in 0 until width) {
+                val depthOffset = rowStart + x * pixelStride
+                out[y * width + x] = depthBuffer.getShort(depthOffset)
+            }
+        }
+        return out
     }
 }
