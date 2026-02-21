@@ -8,7 +8,7 @@
                      android:maxSdkVersion="28" />
 
     <!-- Hardware features -->
-    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
+    <uses-feature android:name="android.hardware.camera.ar" android:required="false" />
     <uses-feature android:name="android.hardware.camera" android:required="true" />
 
     <application
@@ -20,10 +20,10 @@
         android:usesCleartextTraffic="true"
         android:theme="@style/Theme.ARPhotogrammetryCapture">
 
-        <!-- ARCore requirement -->
+        <!-- ARCore optional: app can run with fallback camera preview -->
         <meta-data
             android:name="com.google.ar.core"
-            android:value="required" />
+            android:value="optional" />
 
         <activity
             android:name=".MainActivity"

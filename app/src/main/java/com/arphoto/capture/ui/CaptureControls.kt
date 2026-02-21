@@ -13,6 +13,7 @@ fun CaptureControls(
     isCapturing: Boolean,
     frameCount: Int,
     trackingState: String,
+    arCaptureEnabled: Boolean,
     onToggleCapture: () -> Unit,
     onProcess: () -> Unit,
     onClassify: () -> Unit,
@@ -64,7 +65,7 @@ fun CaptureControls(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
-                enabled = !isBusy,
+                enabled = !isBusy && (arCaptureEnabled || isCapturing),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isCapturing)
                         MaterialTheme.colorScheme.error
@@ -73,7 +74,13 @@ fun CaptureControls(
                 )
             ) {
                 Text(
-                    text = if (isCapturing) "Stop Capture" else "Start Capture",
+                    text = if (isCapturing) {
+                        "Stop Capture"
+                    } else if (!arCaptureEnabled) {
+                        "AR Capture Unavailable"
+                    } else {
+                        "Start Capture"
+                    },
                     style = MaterialTheme.typography.titleMedium
                 )
             }

@@ -1,6 +1,8 @@
 package com.arphoto.capture.arcore
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
@@ -43,6 +45,28 @@ class FrameExporter(private val context: Context) {
         rgbFile.writeBytes(jpegBytes)
 
         return rgbFile
+    }
+
+    fun previewBitmapFromImage(image: Image): Bitmap? {
+        val yuvImage = YuvImage(
+            imageToByteArray(image),
+            ImageFormat.NV21,
+            image.width,
+            image.height,
+            null
+        )
+
+        val out = ByteArrayOutputStream()
+        yuvImage.compressToJpeg(
+            Rect(0, 0, image.width, image.height),
+            75,
+            out
+        )
+        val jpegBytes = out.toByteArray()
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = 2
+        }
+        return BitmapFactory.decodeByteArray(jpegBytes, 0, jpegBytes.size, options)
     }
 
     /**

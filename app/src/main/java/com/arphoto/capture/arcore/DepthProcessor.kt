@@ -69,4 +69,29 @@ object DepthProcessor {
         }
         return out
     }
+
+    /**
+     * Resize depth map using nearest-neighbor so RGB/depth dimensions match for backend fusion.
+     */
+    fun resizeDepthNearest(
+        depthValues: ShortArray,
+        srcWidth: Int,
+        srcHeight: Int,
+        dstWidth: Int,
+        dstHeight: Int
+    ): ShortArray {
+        if (srcWidth == dstWidth && srcHeight == dstHeight) return depthValues
+
+        val out = ShortArray(dstWidth * dstHeight)
+        for (y in 0 until dstHeight) {
+            val srcY = (y * srcHeight) / dstHeight
+            val clampedSrcY = minOf(srcY, srcHeight - 1)
+            for (x in 0 until dstWidth) {
+                val srcX = (x * srcWidth) / dstWidth
+                val clampedSrcX = minOf(srcX, srcWidth - 1)
+                out[y * dstWidth + x] = depthValues[clampedSrcY * srcWidth + clampedSrcX]
+            }
+        }
+        return out
+    }
 }

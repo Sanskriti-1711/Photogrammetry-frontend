@@ -1,11 +1,15 @@
 package com.arphoto.capture.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.arphoto.capture.viewmodel.CaptureUiState
@@ -26,18 +30,19 @@ fun CaptureScreen(
     val isCapturing by viewModel.isCapturing.collectAsState()
     val trackingState by viewModel.trackingState.collectAsState()
     val uploadState by viewModel.uploadState.collectAsState()
+    val previewBitmap by viewModel.previewBitmap.collectAsState()
+    val arCoreError by viewModel.arCoreError.collectAsState()
+    val arCoreAvailable by viewModel.arCoreAvailable.collectAsState()
 
     LaunchedEffect(Unit) {
         viewModel.initializeARCore()
     }
 
-    // Process frames when capturing
-    LaunchedEffect(isCapturing) {
-        if (isCapturing) {
-            while (isCapturing) {
-                viewModel.processFrame()
-                kotlinx.coroutines.delay(100) // Capture ~10 fps
-            }
+    // Continuously update tracking/preview and capture frames when recording.
+    LaunchedEffect(Unit) {
+        while (true) {
+            viewModel.processFrame()
+            kotlinx.coroutines.delay(100)
         }
     }
 
@@ -46,17 +51,38 @@ fun CaptureScreen(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // TODO: AR Camera Preview will go here (Step 3b)
-        // For now, show placeholder
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = androidx.compose.ui.Alignment.Center
-        ) {
-            Text(
-                text = "AR Camera Preview",
-                color = Color.White,
-                style = MaterialTheme.typography.headlineMedium
+        if (!arCoreAvailable) {
+            CameraFallbackPreview(modifier = Modifier.fillMaxSize())
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(16.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Text(
+                    text = "ARCore not available on this device. Preview only mode.",
+                    color = Color.White,
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        } else if (previewBitmap != null) {
+            Image(
+                bitmap = previewBitmap!!.asImageBitmap(),
+                contentDescription = "AR Camera Preview",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
             )
+        } else {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = androidx.compose.ui.Alignment.Center
+            ) {
+                Text(
+                    text = "Start Capture to show camera preview",
+                    color = Color.White,
+                    style = MaterialTheme.typography.headlineSmall
+                )
+            }
         }
 
         // UI Overlay
@@ -81,6 +107,7 @@ fun CaptureScreen(
                 isCapturing = isCapturing,
                 frameCount = frameCount,
                 trackingState = trackingState,
+                arCaptureEnabled = arCoreAvailable,
                 onToggleCapture = { viewModel.toggleCapture() },
                 onProcess = onProcessClick,
                 onClassify = onClassifyClick,
@@ -106,6 +133,14 @@ fun CaptureScreen(
                 modifier = Modifier.padding(16.dp)
             ) {
                 Text((uploadState as UploadState.Error).message)
+            }
+        }
+
+        if (arCoreError.isNotBlank()) {
+            Snackbar(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                Text(arCoreError)
             }
         }
     }

@@ -1,6 +1,8 @@
 package com.arphoto.capture.viewmodel
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.arphoto.capture.arcore.ARCoreManager
@@ -15,6 +17,8 @@ import com.arphoto.capture.network.UploadManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.File
 
 class CaptureViewModel(application: Application) : AndroidViewModel(application) {
@@ -38,21 +42,28 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
 
     private val _uploadState = MutableStateFlow<UploadState>(UploadState.Idle)
     val uploadState: StateFlow<UploadState> = _uploadState
+    private val _previewBitmap = MutableStateFlow<Bitmap?>(null)
+    val previewBitmap: StateFlow<Bitmap?> = _previewBitmap
 
     private val capturedMetadata = mutableListOf<FrameMetadata>()
     private val rgbFiles = mutableListOf<File>()
     private val depthFiles = mutableListOf<File>()
 
     val trackingState = arCoreManager.trackingState
+    val arCoreError = arCoreManager.errorMessage
+    val arCoreAvailable = arCoreManager.isArCoreAvailable
 
     fun initializeARCore() {
-        try {
-            arCoreManager.initializeSession()
-            arCoreManager.resume()
-            _uiState.value = CaptureUiState.Ready
-        } catch (e: Exception) {
-            _uiState.value = CaptureUiState.Error(e.message ?: "ARCore init failed")
+        arCoreManager.initializeSession()
+        if (arCoreManager.isArCoreAvailable.value) {
+            try {
+                arCoreManager.resume()
+            } catch (e: Exception) {
+                _uiState.value = CaptureUiState.Error(e.message ?: "ARCore resume failed")
+                return
+            }
         }
+        _uiState.value = CaptureUiState.Ready
     }
 
     fun selectCategory(category: AssetCategory) {
@@ -60,6 +71,13 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun toggleCapture() {
+        if (!_isCapturing.value && !arCoreManager.isArCoreAvailable.value) {
+            _uiState.value = CaptureUiState.Error(
+                "ARCore not detected. Standard camera preview is available, but AR capture is disabled."
+            )
+            return
+        }
+
         _isCapturing.value = !_isCapturing.value
 
         if (!_isCapturing.value && capturedMetadata.isNotEmpty()) {
@@ -75,47 +93,63 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun processFrame() {
-        if (!_isCapturing.value) return
-
-        viewModelScope.launch {
-            val frame = arCoreManager.update() ?: return@launch
-            val capturedFrame = arCoreManager.captureFrame(frame) ?: return@launch
-
-            val frameNum = _frameCount.value
-
-            // Apply confidence masking
-            val maskedDepth = DepthProcessor.applyConfidenceMask(
-                capturedFrame.depthImage,
-                frame
-            )
-
-            // Save RGB
-            val rgbFile = frameExporter.saveRgbImage(
-                capturedFrame.rgbImage,
-                frameNum
-            )
-
-            // Save depth
-            val depthFile = frameExporter.saveDepthImage(
-                maskedDepth,
-                capturedFrame.depthImage.width,
-                capturedFrame.depthImage.height,
-                frameNum
-            )
-
-            // Store metadata
-            capturedMetadata.add(capturedFrame.metadata)
-            rgbFiles.add(rgbFile)
-            depthFiles.add(depthFile)
-
-            // Clean up images
-            capturedFrame.rgbImage.close()
-            capturedFrame.depthImage.close()
-
-            // Update count
-            _frameCount.value = frameNum + 1
+    suspend fun processFrame() {
+        if (!arCoreManager.isArCoreAvailable.value) {
+            return
         }
+
+        val frame = arCoreManager.update() ?: return
+
+        if (!_isCapturing.value) {
+            val previewImage = arCoreManager.capturePreviewImage(frame) ?: return
+            val preview = withContext(Dispatchers.Default) {
+                frameExporter.previewBitmapFromImage(previewImage)
+            }
+            previewImage.close()
+            _previewBitmap.value = preview
+            return
+        }
+
+        val capturedFrame = arCoreManager.captureFrame(frame) ?: return
+        val frameNum = _frameCount.value
+        val rgbWidth = capturedFrame.rgbImage.width
+        val rgbHeight = capturedFrame.rgbImage.height
+
+        val maskedDepth = DepthProcessor.applyConfidenceMask(
+            capturedFrame.depthImage,
+            frame
+        )
+        val alignedDepth = withContext(Dispatchers.Default) {
+            DepthProcessor.resizeDepthNearest(
+                depthValues = maskedDepth,
+                srcWidth = capturedFrame.depthImage.width,
+                srcHeight = capturedFrame.depthImage.height,
+                dstWidth = rgbWidth,
+                dstHeight = rgbHeight
+            )
+        }
+
+        val rgbFile = withContext(Dispatchers.IO) {
+            frameExporter.saveRgbImage(capturedFrame.rgbImage, frameNum)
+        }
+        _previewBitmap.value = decodePreviewBitmap(rgbFile)
+
+        val depthFile = withContext(Dispatchers.IO) {
+            frameExporter.saveDepthImage(
+                alignedDepth,
+                rgbWidth,
+                rgbHeight,
+                frameNum
+            )
+        }
+
+        capturedMetadata.add(capturedFrame.metadata)
+        rgbFiles.add(rgbFile)
+        depthFiles.add(depthFile)
+
+        capturedFrame.rgbImage.close()
+        capturedFrame.depthImage.close()
+        _frameCount.value = frameNum + 1
     }
 
     fun getCaptureData(): Triple<List<File>, List<File>, CaptureMetadata> {
@@ -207,8 +241,16 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
         capturedMetadata.clear()
         rgbFiles.clear()
         depthFiles.clear()
+        _previewBitmap.value = null
         _frameCount.value = 0
         frameExporter.clearCache()
+    }
+
+    private fun decodePreviewBitmap(file: File): Bitmap? {
+        val options = BitmapFactory.Options().apply {
+            inSampleSize = 2
+        }
+        return runCatching { BitmapFactory.decodeFile(file.absolutePath, options) }.getOrNull()
     }
 
     fun onPause() {
@@ -216,7 +258,11 @@ class CaptureViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun onResume() {
-        arCoreManager.resume()
+        try {
+            arCoreManager.resume()
+        } catch (e: Exception) {
+            _uiState.value = CaptureUiState.Error(e.message ?: "ARCore resume failed")
+        }
     }
 
     override fun onCleared() {
